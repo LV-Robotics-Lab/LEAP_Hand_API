@@ -8,34 +8,22 @@ from std_msgs.msg import String
 from leap_hand_utils.dynamixel_client import *
 import leap_hand_utils.leap_hand_utils as lhu
 from leap_hand.srv import *
-#######################################################
-"""This Controls the LEAP Hand and also sets up ros services that allow you to query the hand.
 
-The services allow you to always have the latest data when you want it, and not spam the communication lines with unused data.
-
-I recommend you only query using services when necessary and below 90 samples a second.  Each of position, velociy and current costs one sample, so you can sample all three at 30 hz or one at 90hz.
-
-#Allegro hand conventions:
-#0.0 is the all the way out beginning pose, and it goes positive as the fingers close more and more
-#http://wiki.wonikrobotics.com/AllegroHandWiki/index.php/Joint_Zeros_and_Directions_Setup_Guide I belive the black and white figure (not blue motors) is the zero position, and the + is the correct way around.  LEAP Hand in my videos start at zero position and that looks like that figure.
 
 #LEAP hand conventions:
-#180 is flat out for the index, middle, ring, fingers, and positive is closing more and more.
+#180 is flat out home pose for the index, middle, ring, finger MCPs.
+#Applying a positive angle closes the joints more and more to curl closed.
+#The MCP is centered at 180 and can move positive or negative to that.
 
-Subscribes
-----------
-joint_angles
+#The joint numbering goes from Index (0-3), Middle(4-7), Ring(8-11) to Thumb(12-15) and from MCP Side, MCP Forward, PIP, DIP for each finger.
+#For instance, the MCP Side of Index is ID 0, the MCP Forward of Ring is 9, the DIP of Ring is 11
 
-Services
-----------
-Makes joint angles, velocity and current available for reading.
-Controls robotic hand
-"""
-########################################################
+#I recommend you only query when necessary and below 90 samples a second.  Used the combined commands if you can to save time.  Also don't forget about the USB latency settings in the readme.
+#The services allow you to always have the latest data when you want it, and not spam the communication lines with unused data.
+
 class LeapNode:
     def __init__(self):
         ####Some parameters to control the hand
-        # self.ema_amount = float(rospy.get_param('/leaphand_node/ema', '1.0')) #take only current
         self.kP = float(rospy.get_param('/leaphand_node/kP', 800.0))
         self.kI = float(rospy.get_param('/leaphand_node/kI', 0.0))
         self.kD = float(rospy.get_param('/leaphand_node/kD', 200.0))
@@ -52,6 +40,8 @@ class LeapNode:
         rospy.Service('leap_effort', leap_effort, self.eff_srv)
         
         #You can put the correct port here or have the node auto-search for a hand at the first 3 ports.
+        # For example ls /dev/serial/by-id/* to find your LEAP Hand. Then use the result.  
+        # For example: /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT7W91VW-if00-port0
         self.motors = motors = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
         try:
             self.dxl_client = DynamixelClient(motors, '/dev/ttyUSB0', 4000000)
@@ -77,19 +67,21 @@ class LeapNode:
         while not rospy.is_shutdown():
             rospy.spin()
 
-    #Receive LEAP pose and directly control the robot
+    # Receive LEAP pose and directly control the robot.  Fully open here is 180 and increases in this value closes the hand.
     def _receive_pose(self, pose):
         pose = pose.position
         self.prev_pos = self.curr_pos
         self.curr_pos = np.array(pose)
         self.dxl_client.write_desired_pos(self.motors, self.curr_pos)
     #Allegro compatibility, first read the allegro publisher and then convert to leap
+    #It adds 180 to the input to make the fully open position at 0 instead of 180.
     def _receive_allegro(self, pose):
         pose = lhu.allegro_to_LEAPhand(pose.position, zeros=False)
         self.prev_pos = self.curr_pos
         self.curr_pos = np.array(pose)
         self.dxl_client.write_desired_pos(self.motors, self.curr_pos)
-    #Sim compatibility, first read the sim publisher and then convert to leap
+    # Sim compatibility, first read the sim publisher and then convert to leap
+    #Sim compatibility for policies, it assumes the ranges are [-1,1] and then convert to leap hand ranges.
     def _receive_ones(self, pose):
         pose = lhu.sim_ones_to_LEAPhand(np.array(pose.position))
         self.prev_pos = self.curr_pos
@@ -105,6 +97,15 @@ class LeapNode:
     #Service that reads and returns the effort/current of the robot in LEAP Embodiment
     def eff_srv(self, req):
         return {"effort": self.dxl_client.read_cur()}
+    #Use these combined services to save a lot of latency if you need multiple datapoints
+    def pos_vel_srv(self, req):
+        output = self.dxl_client.read_pos_vel()
+        return {"position": output[0], "velocity": output[1], "effort": np.zeros_like(output[1])}
+    #Use these combined services to save a lot of latency if you need multiple datapoints
+    def pos_vel_eff_srv(self, req):
+        output = self.dxl_client.read_pos_vel_cur()
+        return {"position": output[0], "velocity": output[1], "effort": output[2]}
+    
 #init the arm node
 def main(**kwargs):
     rospy.init_node("leaphand_node")

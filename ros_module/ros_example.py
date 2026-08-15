@@ -14,6 +14,7 @@ from leap_hand.srv import *
 # This is example code, it reads the position from LEAP Hand and commands it
 # Be sure to query the services only when you need it
 # This way you don't clog up the communication lines and you get the newest data possible
+# If you are looking for position and velocity or pos, vel and curr, I recommend you used the combined services instead of calling them individually, its faster.
 class Telekinesis:
     def __init__(self):        
         rospy.wait_for_service('/leap_position')
@@ -26,9 +27,8 @@ class Telekinesis:
             r.sleep()
             ###only run these services if you need them.
             curr_pos = np.array(self.leap_position().position)
-            #curr_vel = np.array(self.leap_velocity().velocity)
-            #curr_eff = np.array(self.leap_effort().effort)
             print(curr_pos)
+            ##If you want multiple, for instance position, velocity and current, please use the combined services (pos_vel_cur etc.) because they are faster on the motors to query.
             ###This is a fresh position, now do some policy stuff here etc.
             
             #Set the position of the hand when you're done
